@@ -1,22 +1,15 @@
-#todo: koniecznosc zainstalowania OWSLib do wfs
-#todo: utworzenie grup w qgisie
-#todo: utworzenie takiej liczby projektow, ile jest map w arcgisie
-
 import json
+import os
 import sys
+sys.path.append(r'C:\Program Files\QGIS 3.16\apps\qgis-ltr\python\qgis')
 from typing import List, Union
 
 from PyQt5.QtWidgets import QApplication
 from owslib.wfs import WebFeatureService
 from owslib.wms import WebMapService
 from owslib.wmts import WebMapTileService
-from qgis.core import *
-from requests import ReadTimeout
-from urllib3.exceptions import ReadTimeoutError
+from qgis._core import *
 
-TEMP_QGS_PATH = r'C:\Users\klaud\OneDrive\Dokumenty\geoinformatyka\III_rok\praca_inz\new_env_qgis'
-TEMP_QGS_FILE_NAME = 'temp2.qgs'
-JSON_PATH = r'C:\Users\klaud\OneDrive\Dokumenty\geoinformatyka\III_rok\praca_inz\arcpy_env\aprx_data2.json'
 WMS_CORRECT_LINK = 'contextualWMSLegend=0&crs=EPSG:{crs}&dpiMode=7&featureCount=10&format=image/png8&layers={layer}' \
                    '&styles&url={url}'
 WMTS_CORRECT_LINK = 'contextualWMSLegend=0&dpiMode=7&featureCount=10&format=image/png8&layers={layer}&styles' \
@@ -44,7 +37,9 @@ class NewQgsProjectBasedOnAprx:
     groups_dict = {}
     layers_in_groups_dict = {}
 
-    def __init__(self, json_dict, arcgis_map_name):
+    def __init__(self, json_dict, arcgis_map_name, qgis_folder_path, qgis_file_name):
+        self.arcgis_map_name = arcgis_map_name
+        self.qgis_folder_path = qgis_folder_path
         self.json_dict = json_dict.get(arcgis_map_name)
         project = self.create_new_project()
         map_crs = self._get_properties_from_aprx('map_crs')
@@ -53,11 +48,12 @@ class NewQgsProjectBasedOnAprx:
         map_layers = self._get_properties_from_aprx('map_layers')
         self._clear_text_file()
         self._add_layers_to_project(project, map_layers)
-        self.qgis_file_name, ext = TEMP_QGS_FILE_NAME.split('.')
-        self._save_project(project, f'{TEMP_QGS_PATH}\\{self.qgis_file_name}_{arcgis_map_name}.{ext}')
+        self.qgis_file_name = qgis_file_name
+        self._save_project(project, f'{qgis_folder_path}\\{self.qgis_file_name}_{arcgis_map_name}.qgs')
 
     def create_new_project(self) -> QgsProject:
         project = QgsProject.instance()
+        project.clear()
         return project
 
     def _get_properties_from_aprx(self, aprx_property: str) -> List[Union[str, str]]:
@@ -77,71 +73,37 @@ class NewQgsProjectBasedOnAprx:
         view_settings.setDefaultViewExtent(referenced_rect)
 
     def _add_group_to_project(self, group_name: str, value: dict) -> QgsLayerTreeGroup:
-        root = QgsProject.instance().layerTreeRoot()
-        if value.get('supergroup_id'):
-            supergroup = self.groups_dict.get(value.get('supergroup_id'))
-            group = supergroup.addGroup(group_name)
-            # self.groups_dict[value.get('id')] = group
+        if not bool(value.get('supergroup_id')):
+            root = QgsProject.instance().layerTreeRoot()
+            group = root.insertGroup(0, group_name)
             return group
-        group = root.addGroup(group_name)
-        return group
 
     def _add_layers_to_project(self, project: QgsProject, map_layers: list):
-        list_of_layers = []
-        for map_layer in map_layers:
+        self.list_of_layers = []
+        for map_layer in reversed(map_layers):
             for key, value in map_layer.items():
                 if key in 'GroupLayer':
                     group_name = value.get('name')
                     group = self._add_group_to_project(group_name, value)
-                    self.groups_dict[value.get('id')] = group
-                    # list_of_layers.append(group)
-                    # group.setCustomProperty('id', value.get('id'))
-                    group.setItemVisibilityChecked(value.get('visible'))
+                    if bool(group):
+                        self.groups_dict[value.get('id')] = group
+                        group.setItemVisibilityChecked(value.get('visible'))
                     continue
                 if bool(value.get('supergroup_id')):
-                    self._add_layer_to_group(self.groups_dict.get(value.get('supergroup_id')), value, key)
                     continue
-                    # return
-                    # self.layers_in_groups_dict[]
-                    # group = self.groups_dict.get(value.get('supergroup_id'))
-                    # self._add_layer_to_project(value, key, 'group.addLayer(layer)', project, group)
-                self._add_layer_to_project(value, key, 'QgsProject.instance().addMapLayer(layer)', project)
-        QgsProject.instance().addMapLayers(list_of_layers)
+                self._add_layer_to_project(key, value, True, project, None)
+        for map_layer in map_layers:
+            for key, value in map_layer.items():
+                if bool(value.get('supergroup_id')) and key in 'GroupLayer':
+                    group_name = value.get('name')
+                    supergroup = self.groups_dict.get(value.get('supergroup_id'))
+                    group = supergroup.addGroup(group_name)
+                    self.groups_dict[value.get('id')] = group
+                if bool(value.get('supergroup_id')) and key not in 'GroupLayer':
+                    group = self.groups_dict.get(value.get('supergroup_id'))
+                    self._add_layer_to_project(key, value, False, project, group)
 
-    def _add_layer_to_group(self, group, value, key):
-        # groupName = "test group"
-        # root = QgsProject.instance().layerTreeRoot()
-        # group = root.addGroup(groupName)
-        # vlayer = QgsVectorLayer("C:/Temp/myShp.shp", "shpName", "ogr")
-        source = value.get('source')
-        name = value.get('name')
-        crs = value.get('crs')
-        transparency = value.get('transparency')
-        visible = value.get('visible')
-        if key in self.web_layers_dict.keys():
-            vlayer = self._create_web_layer(source, name, crs, key, *self.web_layers_dict.get(key))
-        else:
-            layer_type = self.layers_dict.get(key)
-            vlayer = layer_type(source, name, 'ogr')
-            vlayer.setCrs(QgsCoordinateReferenceSystem(f'EPSG:{crs}'))
-        if vlayer is None:
-            self._write_errors_to_text_file(f'{key}, {name}')
-            return
-        # group.addLayer(vlayer)
-        QgsProject.instance().addMapLayer(vlayer, False)
-        renderer = ''
-        if vlayer.type() == 1:
-            renderer = '.renderer()'
-
-        root = QgsProject.instance().layerTreeRoot()
-        # layer = root.findLayer(vlayer.id())
-        # clone = layer.clone()
-        group.addLayer(vlayer)
-        eval(f'vlayer{renderer}.setOpacity({transparency} / 100.0)')
-        QgsProject.instance().layerTreeRoot().findLayer(vlayer.id()).setItemVisibilityChecked(visible)
-        # root.removeChildNode(layer)
-
-    def _add_layer_to_project(self, value, key, func_add, project, group=None):
+    def _add_layer_to_project(self, key, value, add_to_legend, project, group):
         source = value.get('source')
         name = value.get('name')
         crs = value.get('crs')
@@ -151,16 +113,14 @@ class NewQgsProjectBasedOnAprx:
             layer = self._create_web_layer(source, name, crs, key, *self.web_layers_dict.get(key))
         else:
             layer_type = self.layers_dict.get(key)
-            if layer_type == 'Shape File':
-                layer = layer_type(source, name, 'ogr')
-            else:
-                layer = layer_type(source, name)
+            layer = layer_type(source, name)
             layer.setCrs(QgsCoordinateReferenceSystem(f'EPSG:{crs}'))
         if layer is None:
             self._write_errors_to_text_file(f'{key}, {name}')
             return
-            # print()
-        eval(func_add)
+        QgsProject.instance().addMapLayer(layer, addToLegend=add_to_legend)
+        if not bool(add_to_legend):
+            group.addLayer(layer)
         renderer = ''
         if layer.type() == 1:
             renderer = '.renderer()'
@@ -185,23 +145,28 @@ class NewQgsProjectBasedOnAprx:
     def _save_project(self, project, file_path):
         project.write(file_path)
 
-    def _write_errors_to_text_file(self, message):
-        with open(f'{TEMP_QGS_PATH}\\errors.txt', 'a') as errors_file:
-            errors_file.write(f'Uwaga! Do projektu nie udało się zapisać warstwy: {message}\n')
-
     def _clear_text_file(self):
-        with open(f'{TEMP_QGS_PATH}\\errors.txt', 'w'):
+        with open(f'{self.qgis_folder_path}\\errors_{self.arcgis_map_name}.txt', 'w'):
             pass
 
+    def _write_errors_to_text_file(self, message):
+        with open(f'{self.qgis_folder_path}\\errors_{self.arcgis_map_name}.txt', 'a') as errors_file:
+            errors_file.write(f'Uwaga! Do projektu nie udało się zapisać warstwy: {message}\n')
 
-def main():
+
+def main(qgis_folder_path, qgis_file_name):
     qgs = QApplication(sys.argv)
     QgsApplication.setPrefixPath(r"C:/PROGRA~1/QGIS3~1.16/apps/qgis-ltr", True)
     QgsApplication.initQgis()
-    json_dict = read_aprx_project_properties(JSON_PATH)
+    json_dict = read_aprx_project_properties(f'{qgis_folder_path}\\aprx_path.json')
     for arcgis_map_name in json_dict.keys():
-        NewQgsProjectBasedOnAprx(json_dict=json_dict, arcgis_map_name=arcgis_map_name)
+        NewQgsProjectBasedOnAprx(json_dict, arcgis_map_name, qgis_folder_path, qgis_file_name)
 
 
 if __name__ == '__main__':
-    main()
+    with open(r'C:\Users\klaud\OneDrive\Dokumenty\geoinformatyka\III_rok\praca_inz\qgis\temp_text_file.txt', 'r') as \
+            temp_text_file:
+        lines = temp_text_file.readlines()
+        qgis_folder_path, qgis_file_name = lines
+    os.remove(r'C:\Users\klaud\OneDrive\Dokumenty\geoinformatyka\III_rok\praca_inz\qgis\temp_text_file.txt')
+    main(qgis_folder_path.strip(), qgis_file_name.strip())
