@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import QApplication
 from owslib.wfs import WebFeatureService
 from owslib.wms import WebMapService
 from owslib.wmts import WebMapTileService
-from qgis._core import *
+from qgis.core import *
 
 WMS_CORRECT_LINK = 'contextualWMSLegend=0&crs=EPSG:{crs}&dpiMode=7&featureCount=10&format=image/png8&layers={layer}' \
                    '&styles&url={url}'
@@ -26,7 +26,8 @@ def read_aprx_project_properties(json_path: str) -> dict:
 class NewQgsProjectBasedOnAprx:
     layers_dict = {
         'Shape File': QgsVectorLayer,
-        'Raster': QgsRasterLayer
+        'Raster': QgsRasterLayer,
+        'unknown_layer': None
     }
     web_layers_dict = {
         'WMS': (WebMapService, '1.3.0', WMS_CORRECT_LINK, QgsRasterLayer, 'wms', "'crs': crs, "),
@@ -38,8 +39,10 @@ class NewQgsProjectBasedOnAprx:
     layers_in_groups_dict = {}
 
     def __init__(self, json_dict, arcgis_map_name, qgis_folder_path, qgis_file_name):
+        self.created_files_list = []
         self.arcgis_map_name = arcgis_map_name
         self.qgis_folder_path = qgis_folder_path
+        self.qgis_file_name = qgis_file_name
         self.json_dict = json_dict.get(arcgis_map_name)
         project = self.create_new_project()
         map_crs = self._get_properties_from_aprx('map_crs')
@@ -48,8 +51,9 @@ class NewQgsProjectBasedOnAprx:
         map_layers = self._get_properties_from_aprx('map_layers')
         self._clear_text_file()
         self._add_layers_to_project(project, map_layers)
-        self.qgis_file_name = qgis_file_name
-        self._save_project(project, f'{qgis_folder_path}\\{self.qgis_file_name}_{arcgis_map_name}.qgs')
+        self._save_project(project, f'{qgis_folder_path}\\{self.qgis_file_name}_{arcgis_map_name}.qgs',
+                           f'{self.qgis_file_name}_{arcgis_map_name}.qgs')
+        self._save_created_files(set(self.created_files_list))
 
     def create_new_project(self) -> QgsProject:
         project = QgsProject.instance()
@@ -104,15 +108,22 @@ class NewQgsProjectBasedOnAprx:
                     self._add_layer_to_project(key, value, False, project, group)
 
     def _add_layer_to_project(self, key, value, add_to_legend, project, group):
-        source = value.get('source')
-        name = value.get('name')
-        crs = value.get('crs')
-        transparency = value.get('transparency')
-        visible = value.get('visible')
+        if key not in 'unknown_layer':
+            source = value.get('source')
+            name = value.get('name')
+            crs = value.get('crs')
+            transparency = value.get('transparency')
+            visible = value.get('visible')
         if key in self.web_layers_dict.keys():
             layer = self._create_web_layer(source, name, crs, key, *self.web_layers_dict.get(key))
+            if layer is True:
+                return
         else:
             layer_type = self.layers_dict.get(key)
+            if key == 'unknown_layer':
+                if value.get('name'):
+                    self._write_errors_to_text_file(f'Nieznany typ warstwy, {value.get("name")}')
+                    return
             layer = layer_type(source, name)
             layer.setCrs(QgsCoordinateReferenceSystem(f'EPSG:{crs}'))
         if layer is None:
@@ -121,10 +132,10 @@ class NewQgsProjectBasedOnAprx:
         QgsProject.instance().addMapLayer(layer, addToLegend=add_to_legend)
         if not bool(add_to_legend):
             group.addLayer(layer)
-        renderer = ''
         if layer.type() == 1:
-            renderer = '.renderer()'
-        eval(f'layer{renderer}.setOpacity({transparency} / 100.0)')
+            layer.renderer().setOpacity((100.0 - float(transparency)) / 100.0)
+        else:
+            layer.setOpacity((100.0 - float(transparency)) / 100.0)
         project.layerTreeRoot().findLayer(layer.id()).setItemVisibilityChecked(visible)
 
     def _create_web_layer(self, source, name, crs, key, web_service, version, correct_link, layer_type, data_provider,
@@ -141,32 +152,43 @@ class NewQgsProjectBasedOnAprx:
                     return layer
         except:
             self._write_errors_to_text_file(f'{key}, {name}')
+            return True
 
-    def _save_project(self, project, file_path):
+    def _save_project(self, project, file_path, file_name):
         project.write(file_path)
+        self.created_files_list.append(file_name)
 
     def _clear_text_file(self):
-        with open(f'{self.qgis_folder_path}\\errors_{self.arcgis_map_name}.txt', 'w'):
-            pass
+        if os.path.isfile(f'{self.qgis_folder_path}\\errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt'):
+            with open(f'{self.qgis_folder_path}\\errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt', 'w'):
+                pass
 
     def _write_errors_to_text_file(self, message):
-        with open(f'{self.qgis_folder_path}\\errors_{self.arcgis_map_name}.txt', 'a') as errors_file:
+        with open(f'{self.qgis_folder_path}\\errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt', 'a') \
+                as errors_file:
             errors_file.write(f'Uwaga! Do projektu nie udało się zapisać warstwy: {message}\n')
+            self.created_files_list.append(f'errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt')
+
+    def _save_created_files(self, files_list):
+        with open(f'{os.getcwd()}\\saved_files.txt', 'a') as saved_files:
+            saved_files.write('\n'.join(files_list))
+            saved_files.write('\n')
 
 
-def main(qgis_folder_path, qgis_file_name):
+def main(qgis_folder_path, qgis_file_name, qgis_instance_dir):
     qgs = QApplication(sys.argv)
-    QgsApplication.setPrefixPath(r"C:/PROGRA~1/QGIS3~1.16/apps/qgis-ltr", True)
+    QgsApplication.setPrefixPath(f'{qgis_instance_dir}\\apps\\qgis-ltr', True)
     QgsApplication.initQgis()
-    json_dict = read_aprx_project_properties(f'{qgis_folder_path}\\aprx_path.json')
+    json_dict = read_aprx_project_properties(f'{arcgis_project_dir}\\arcgis_project_properties.json')
     for arcgis_map_name in json_dict.keys():
         NewQgsProjectBasedOnAprx(json_dict, arcgis_map_name, qgis_folder_path, qgis_file_name)
 
 
 if __name__ == '__main__':
-    with open(r'C:\Users\klaud\OneDrive\Dokumenty\geoinformatyka\III_rok\praca_inz\qgis\temp_text_file.txt', 'r') as \
-            temp_text_file:
-        lines = temp_text_file.readlines()
-        qgis_folder_path, qgis_file_name = lines
-    os.remove(r'C:\Users\klaud\OneDrive\Dokumenty\geoinformatyka\III_rok\praca_inz\qgis\temp_text_file.txt')
-    main(qgis_folder_path.strip(), qgis_file_name.strip())
+    arcgis_project_dir = os.getcwd()
+    properties_for_qgis_project_dict = read_aprx_project_properties(
+        f'{arcgis_project_dir}\\properties_for_qgis_project.json')
+    _, qgis_folder_path, qgis_file_name, qgis_instance_dir = properties_for_qgis_project_dict.values()
+    main(qgis_folder_path, qgis_file_name, qgis_instance_dir)
+    os.remove(f'{arcgis_project_dir}\\properties_for_qgis_project.json')
+    os.remove(f'{arcgis_project_dir}\\arcgis_project_properties.json')
