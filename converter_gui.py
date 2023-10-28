@@ -1,26 +1,25 @@
 import os
 import sys
-from PyQt5.QtWidgets import QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, \
+from PyQt5.QtWidgets import QApplication, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton, \
     QFileDialog, QDialog
 
 
-# from main import run_qgs_converter
-
-
-class MyQtGUI(QDialog):
-    def __init__(self):
+class ConverterGui(QDialog):
+    def __init__(self, parent, qgis_instance_dir):
         super().__init__()
         self.initUI()
-        self._dialog_values = []
+        self.parent = parent
+        self.qgis_instance_dir = qgis_instance_dir
+        self.dialog_values = []
 
     def initUI(self):
         self.setWindowTitle('Program do konwersji pliku .aprx do pliku .qgs')
-        self.setGeometry(100, 100, 400, 200)
+        self.setGeometry(100, 100, 500, 200)
 
         self.file_path = QLineEdit(self)
-        self.file_path.setPlaceholderText('Ścieżka do pliku')
+        self.file_path.setPlaceholderText('Ścieżka do pliku .aprx')
         self.folder_path = QLineEdit(self)
-        self.folder_path.setPlaceholderText('Ścieżka do folderu')
+        self.folder_path.setPlaceholderText('Ścieżka do folderu zapisu projektu QGIS')
         self.qgis_file_name = QLineEdit(self)
         self.qgis_file_name.setPlaceholderText('Nazwa projektu QGIS')
 
@@ -29,12 +28,12 @@ class MyQtGUI(QDialog):
         self.browse_folder_button = QPushButton('Przeglądaj folder', self)
         self.browse_folder_button.clicked.connect(self.browse_folder)
 
-        self.validate_button = QPushButton('Zatwierdź', self)
+        self.validate_button = QPushButton('Uruchom program', self)
         self.validate_button.clicked.connect(self.validate_paths)
 
         self.result_label = QLabel(self)
 
-        v_layout = QVBoxLayout()
+        self.v_layout = QVBoxLayout()
         h_layout1 = QHBoxLayout()
         h_layout2 = QHBoxLayout()
         h_layout3 = QHBoxLayout()
@@ -45,16 +44,17 @@ class MyQtGUI(QDialog):
         h_layout2.addWidget(self.browse_folder_button)
         h_layout3.addWidget(self.qgis_file_name)
 
-        v_layout.addLayout(h_layout1)
-        v_layout.addLayout(h_layout2)
-        v_layout.addLayout(h_layout3)
-        v_layout.addWidget(self.validate_button)
-        v_layout.addWidget(self.result_label)
+        self.v_layout.addLayout(h_layout1)
+        self.v_layout.addLayout(h_layout2)
+        self.v_layout.addLayout(h_layout3)
+        self.v_layout.addWidget(self.validate_button)
+        self.v_layout.addWidget(self.result_label)
 
-        self.setLayout(v_layout)
+        self.setLayout(self.v_layout)
 
     def browse_file(self):
-        file_path, _ = QFileDialog.getOpenFileName(self, 'Wybierz plik')
+        file_filter = "aprx(*.aprx)"
+        file_path, _ = QFileDialog.getOpenFileName(self, 'Wybierz plik', filter=file_filter)
         if file_path:
             self.file_path.setText(file_path)
 
@@ -95,21 +95,42 @@ class MyQtGUI(QDialog):
                                           'poprawnie uzupełnić podświetlone elementy!')
 
         if all((os.path.isfile(file_path), os.path.isdir(folder_path), self.qgis_file_name.text())):
-            self.accept()
+            self.remove_red_frame(self.file_path)
+            self.remove_red_frame(self.folder_path)
+            self.remove_red_frame(self.qgis_file_name)
+            self.result_label.setText('')
+            for button in (self.browse_file_button, self.browse_folder_button, self.validate_button):
+                button.setEnabled(False)
+            self.dump_to_json()
+            self.parent.run_converter_qgis()
 
-    def accept(self):
-        self._dialog_values = self.file_path.text(), self.folder_path.text(), self.qgis_file_name.text()
-        super(MyQtGUI, self).accept()
+    def dump_to_json(self):
+        aprx_properties = {
+            'arcgis_file_path': self.file_path.text(),
+            'qgis_folder_path': self.folder_path.text(),
+            'qgis_file_name': self.qgis_file_name.text(),
+            'qgis_instance_dir': self.qgis_instance_dir
+        }
+        self.parent.dump_aprx_properties_to_json(f'{self.parent.arcgis_project_dir}\\properties_for_qgis_project.json',
+                                                 aprx_properties)
+
+    def add_label_after_conversion(self):
+        with open(f'{self.parent.arcgis_project_dir}\\saved_files.txt', 'r') as saved_files:
+            created_files = saved_files.readlines()
+            created_files = ''.join(created_files)
+        self.result_label.setText(f'Operacja wykonana pomyślnie!\n'
+                                  f'W wyniku działania programu, w ścieżce {self.folder_path.text()} '
+                                  f'zostały utworzone następujące pliki:\n{created_files}')
+        os.remove(f'{self.parent.arcgis_project_dir}\\saved_files.txt')
 
 
-def exec_dialog():
-    app = QApplication(sys.argv)
-    window = MyQtGUI()
-    window.show()
-    if window.exec_():
-        return window._dialog_values
-    sys.exit(app.exec_())
+class ExecDialog:
+    def __init__(self, parent, qgis_instance_dir):
+        self.parent = parent
+        self.qgis_instance_dir = qgis_instance_dir
 
-
-vals = exec_dialog()
-
+    def exec_dlg(self):
+        app = QApplication(sys.argv)
+        self.window = ConverterGui(self.parent, self.qgis_instance_dir)
+        self.window.show()
+        sys.exit(app.exec_())
