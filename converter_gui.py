@@ -52,6 +52,8 @@ class ConverterGui(QDialog):
 
         self.setLayout(self.v_layout)
 
+        self.result_label.setText('')
+
     def browse_file(self):
         file_filter = "aprx(*.aprx)"
         file_path, _ = QFileDialog.getOpenFileName(self, 'Wybierz plik', filter=file_filter)
