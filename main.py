@@ -4,6 +4,9 @@ import sys
 sys.path.append(r'C:\Program Files\QGIS 3.16\apps\qgis-ltr\python\qgis')
 from typing import List, Union
 
+import installer
+installer.install_pyqt5()
+installer.install_owslib()
 from PyQt5.QtWidgets import QApplication
 from owslib.wfs import WebFeatureService
 from owslib.wms import WebMapService
@@ -53,7 +56,7 @@ class NewQgsProjectBasedOnAprx:
         self._add_layers_to_project(project, map_layers)
         self._save_project(project, f'{qgis_folder_path}\\{self.qgis_file_name}_{arcgis_map_name}.qgs',
                            f'{self.qgis_file_name}_{arcgis_map_name}.qgs')
-        self._save_created_files(set(self.created_files_list))
+        self._save_created_txt_files(set(self.created_files_list))
 
     def create_new_project(self) -> QgsProject:
         project = QgsProject.instance()
@@ -133,7 +136,8 @@ class NewQgsProjectBasedOnAprx:
         if not bool(add_to_legend):
             group.addLayer(layer)
         if layer.type() == 1:
-            layer.renderer().setOpacity((100.0 - float(transparency)) / 100.0)
+            if layer.isValid():
+                layer.renderer().setOpacity((100.0 - float(transparency)) / 100.0)
         else:
             layer.setOpacity((100.0 - float(transparency)) / 100.0)
         project.layerTreeRoot().findLayer(layer.id()).setItemVisibilityChecked(visible)
@@ -169,7 +173,7 @@ class NewQgsProjectBasedOnAprx:
             errors_file.write(f'Uwaga! Do projektu nie udało się zapisać warstwy: {message}\n')
             self.created_files_list.append(f'errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt')
 
-    def _save_created_files(self, files_list):
+    def _save_created_txt_files(self, files_list):
         with open(f'{os.getcwd()}\\saved_files.txt', 'a') as saved_files:
             saved_files.write('\n'.join(files_list))
             saved_files.write('\n')
@@ -177,7 +181,7 @@ class NewQgsProjectBasedOnAprx:
 
 def main(qgis_folder_path, qgis_file_name, qgis_instance_dir):
     qgs = QApplication(sys.argv)
-    QgsApplication.setPrefixPath(f'{qgis_instance_dir}\\apps\\qgis-ltr', True)
+    QgsApplication.setPrefixPath(f'{qgis_instance_dir}\\..\\apps\\qgis-ltr', True)
     QgsApplication.initQgis()
     json_dict = read_aprx_project_properties(f'{arcgis_project_dir}\\arcgis_project_properties.json')
     for arcgis_map_name in json_dict.keys():
