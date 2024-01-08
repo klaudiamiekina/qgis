@@ -2,7 +2,7 @@ import json
 import os
 import sys
 sys.path.append(r'C:\Program Files\QGIS 3.16\apps\qgis-ltr\python\qgis')
-from typing import List, Union
+from typing import List, Union, Dict, Iterable
 
 import installer
 installer.install_pyqt5()
@@ -41,7 +41,7 @@ class NewQgsProjectBasedOnAprx:
     groups_dict = {}
     layers_in_groups_dict = {}
 
-    def __init__(self, json_dict, arcgis_map_name, qgis_folder_path, qgis_file_name):
+    def __init__(self, json_dict: Dict, arcgis_map_name: str, qgis_folder_path: str, qgis_file_name: str):
         self.created_files_list = []
         self.arcgis_map_name = arcgis_map_name
         self.qgis_folder_path = qgis_folder_path
@@ -66,10 +66,10 @@ class NewQgsProjectBasedOnAprx:
     def _get_properties_from_aprx(self, aprx_property: str) -> List[Union[str, str]]:
         return self.json_dict.get(aprx_property)
 
-    def _set_crs_for_project(self, project: QgsProject, map_crs: List[str]):
+    def _set_crs_for_project(self, project: QgsProject, map_crs: List[str]) -> None:
         project.setCrs(QgsCoordinateReferenceSystem(f"EPSG:{map_crs}"))
 
-    def _set_extent_for_project(self, project: QgsProject, map_crs: List[str]):
+    def _set_extent_for_project(self, project: QgsProject, map_crs: List[str]) -> None:
         view_settings = project.viewSettings()
         referenced_rect = QgsReferencedRectangle()
         referenced_rect.setCrs(QgsCoordinateReferenceSystem(f"EPSG:{map_crs}"))
@@ -85,7 +85,7 @@ class NewQgsProjectBasedOnAprx:
             group = root.insertGroup(0, group_name)
             return group
 
-    def _add_layers_to_project(self, project: QgsProject, map_layers: list):
+    def _add_layers_to_project(self, project: QgsProject, map_layers: list) -> None:
         self.list_of_layers = []
         for map_layer in reversed(map_layers):
             for key, value in map_layer.items():
@@ -110,7 +110,8 @@ class NewQgsProjectBasedOnAprx:
                     group = self.groups_dict.get(value.get('supergroup_id'))
                     self._add_layer_to_project(key, value, False, project, group)
 
-    def _add_layer_to_project(self, key, value, add_to_legend, project, group):
+    def _add_layer_to_project(self, key: str, value: Dict, add_to_legend: bool, project: QgsProject,
+                              group: QgsLayerTreeGroup) -> None:
         if key not in 'unknown_layer':
             source = value.get('source')
             name = value.get('name')
@@ -142,8 +143,8 @@ class NewQgsProjectBasedOnAprx:
             layer.setOpacity((100.0 - float(transparency)) / 100.0)
         project.layerTreeRoot().findLayer(layer.id()).setItemVisibilityChecked(visible)
 
-    def _create_web_layer(self, source, name, crs, key, web_service, version, correct_link, layer_type, data_provider,
-                          crs_str):
+    def _create_web_layer(self, source: str, name: str, crs: int, key: str, web_service, version: str,
+                          correct_link: str, layer_type, data_provider, crs_str: str) -> None:
         try:
             web_layer_service = web_service(source, version=version)
             for service in list(web_layer_service.contents):
@@ -158,28 +159,28 @@ class NewQgsProjectBasedOnAprx:
             self._write_errors_to_text_file(f'{key}, {name}')
             return True
 
-    def _save_project(self, project, file_path, file_name):
+    def _save_project(self, project: QgsProject, file_path: str, file_name: str) -> None:
         project.write(file_path)
         self.created_files_list.append(file_name)
 
-    def _clear_text_file(self):
+    def _clear_text_file(self) -> None:
         if os.path.isfile(f'{self.qgis_folder_path}\\errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt'):
             with open(f'{self.qgis_folder_path}\\errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt', 'w'):
                 pass
 
-    def _write_errors_to_text_file(self, message):
+    def _write_errors_to_text_file(self, message: str) -> None:
         with open(f'{self.qgis_folder_path}\\errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt', 'a') \
                 as errors_file:
             errors_file.write(f'Uwaga! Do projektu nie udało się zapisać warstwy: {message}\n')
             self.created_files_list.append(f'errors_{self.qgis_file_name}_{self.arcgis_map_name}.txt')
 
-    def _save_created_txt_files(self, files_list):
+    def _save_created_txt_files(self, files_list: Iterable[str]) -> None:
         with open(f'{os.getcwd()}\\saved_files.txt', 'a') as saved_files:
             saved_files.write('\n'.join(files_list))
             saved_files.write('\n')
 
 
-def main(qgis_folder_path, qgis_file_name, qgis_instance_dir):
+def main(qgis_folder_path: str, qgis_file_name: str, qgis_instance_dir: str) -> None:
     qgs = QApplication(sys.argv)
     QgsApplication.setPrefixPath(f'{qgis_instance_dir}\\..\\apps\\qgis-ltr', True)
     QgsApplication.initQgis()
